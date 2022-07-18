@@ -1,0 +1,31 @@
+[package]
+name = "anchor-bpf-template"
+version = "0.1.0"
+description = "Created with Anchor"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "anchor-bpf-template"
+
+[features]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+cpi = ["no-entrypoint"]
+default = []
+
+[profile.release]
+overflow-checks = true
+
+[dependencies]
+anchor-lang = "0.25.0"
+mpl-token-metadata = { version = "1.2.5", features = ["no-entrypoint"]}
+spl-token = { version = "3.3.0", features = ["no-entrypoint"] }
+
+[dev-dependencies]
+solana-sdk = "~1.9.18"
+solana-program-test = "~1.9.18"
+solana-logger = "~1.9.18"
+spl-associated-token-account = "1.0.3"
+arrayref = "0.3.6"
