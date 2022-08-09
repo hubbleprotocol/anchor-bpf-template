@@ -1,7 +1,12 @@
 use std::sync::Arc;
 
-use solana_program_test::ProgramTest;
-use solana_sdk::{account::Account, signature::Keypair, signer::Signer};
+use solana_program_test::{ProgramTest, ProgramTestContext};
+use solana_sdk::{
+    account::{Account, AccountSharedData},
+    signature::Keypair,
+    signer::Signer,
+    system_program,
+};
 
 pub type KP = Arc<Keypair>;
 pub fn kp() -> KP {
@@ -21,6 +26,31 @@ pub fn fund_kp(test: &mut ProgramTest, min_balance_lamports: u64, user: Arc<Keyp
 
 pub fn funded_kp(test: &mut ProgramTest, min_balance_lamports: u64) -> KP {
     fund_kp(test, min_balance_lamports, kp())
+}
+
+pub fn funded_new_kp(test: &mut ProgramTestContext, min_balance_lamports: u64) -> KP {
+    fund_new_kp(test, min_balance_lamports, kp())
+}
+
+pub fn fund_new_kp(
+    test: &mut ProgramTestContext,
+    min_balance_lamports: u64,
+    user: Arc<Keypair>,
+) -> KP {
+    let account = AccountSharedData::new(min_balance_lamports, 0, &system_program::ID);
+    test.set_account(&user.pubkey(), &account);
+    user
+}
+
+pub fn funded_new_kps<const NUM: usize>(
+    test: &mut ProgramTestContext,
+    min_balance_lamports: u64,
+) -> [KP; NUM] {
+    (0..NUM)
+        .map(|_| funded_new_kp(test, min_balance_lamports))
+        .collect::<Vec<KP>>()
+        .try_into()
+        .unwrap()
 }
 
 pub fn funded_kps<const NUM: usize>(

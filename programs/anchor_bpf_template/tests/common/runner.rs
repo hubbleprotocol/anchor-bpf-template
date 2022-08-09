@@ -2,7 +2,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anchor_lang::prelude::{Clock, Pubkey};
+use arrayref::array_ref;
+use solana_program_test::BanksClientError;
 use solana_sdk::commitment_config::CommitmentLevel;
+use solana_sdk::hash::Hash;
 use solana_sdk::program_error::ProgramError;
 use solana_sdk::program_pack::Pack;
 use solana_sdk::signature::Keypair;
@@ -15,26 +18,41 @@ use spl_token::state::Mint;
 
 use crate::common::setup::KP;
 
+use self::token::create_token_account;
+
 use super::types::TestContext;
 
 pub mod test {
     use solana_program_test::{processor, ProgramTest};
 
-    use crate::common::{fixtures::ProgramDependency, types::TestContext};
+    use crate::common::{consts::solend, fixtures::ProgramDependency, types::TestContext};
 
     use super::*;
     pub fn program(dependencies: &[ProgramDependency]) -> ProgramTest {
-        //let serum_program_id = dex::ID;
-        //let solend_program_id = Pubkey::new_unique();
-        let mut program_test =
-            ProgramTest::new("orca_lping", orca_lping::ID, processor!(orca_lping::entry));
+        let mut program_test = ProgramTest::new(
+            "anchor_bpf_template",
+            anchor_bpf_template::ID,
+            processor!(anchor_bpf_template::entry),
+        );
 
         dependencies.iter().for_each(|dep| match dep {
-            ProgramDependency::WHIRLPOOL => {
-                program_test.add_program("whirlpool", whirlpool::ID, None);
+            ProgramDependency::SOLEND => {
+                program_test.add_program("solend", solend::ID, None);
             }
-            ProgramDependency::METAPLEX => {
-                program_test.add_program("mpl-token-metadata", mpl_token_metadata::ID, None);
+            ProgramDependency::BANKMAN => {
+                program_test.add_program("bankman", bankman::ID, None);
+            }
+            ProgramDependency::BRRR => {
+                program_test.add_program("brrr-0.2.0", brrr::ID, None);
+            }
+            ProgramDependency::ARROW => {
+                program_test.add_program("arrow_sunny", arrow_sunny::ID, None);
+            }
+            ProgramDependency::CRATE_TOKEN => {
+                program_test.add_program("crate_token", crate_token::ID, None);
+            }
+            ProgramDependency::SABER => {
+                program_test.add_program("stable_swap", stable_swap_client::ID, None);
             }
         });
         program_test
@@ -52,10 +70,65 @@ pub mod test {
     }
 }
 
+pub mod state {
+
+    use anchor_lang::{AccountDeserialize, Discriminator};
+    use solana_sdk::account::Account;
+
+    use crate::common::types::TestError;
+
+    use super::*;
+    pub async fn get<T: AccountDeserialize + Discriminator>(
+        env: &mut TestContext,
+        address: Pubkey,
+    ) -> T {
+        let acc = try_get::<T>(env, address).await;
+        acc.unwrap()
+    }
+    pub async fn try_get<T: AccountDeserialize + Discriminator>(
+        env: &mut TestContext,
+        address: Pubkey,
+    ) -> Result<T, TestError> {
+        match env
+            .context
+            .banks_client
+            .get_account(address)
+            .await
+            .map_err(|e| {
+                println!("Error {:?}", e);
+                TestError::UnknownError
+            })? {
+            Some(data) => deserialize::<T>(&data).map_err(|e| {
+                println!("Error {:?}", e);
+                TestError::CannotDeserialize
+            }),
+            None => return Err(TestError::AccountNotFound),
+        }
+    }
+    pub unsafe fn any_as_u8_slice<T: Sized>(p: &T) -> &[u8] {
+        ::std::slice::from_raw_parts((p as *const T) as *const u8, ::std::mem::size_of::<T>())
+    }
+
+    pub fn deserialize<T: AccountDeserialize + Discriminator>(
+        account: &Account,
+    ) -> Result<T, TestError> {
+        let discriminator = &account.data[..8];
+        if discriminator != T::discriminator() {
+            return Err(TestError::BadDiscriminator);
+        }
+
+        let mut data: &[u8] = &account.data;
+        let user: T = T::try_deserialize(&mut data).map_err(|_| TestError::CannotDeserialize)?;
+
+        return Ok(user);
+    }
+}
+
 pub mod token {
     use arrayref::array_ref;
+    use solana_program_test::BanksClientError;
 
-    use crate::common::types::TestContext;
+    use crate::{common::types::TestContext, send_transaction};
 
     use super::*;
 
@@ -81,15 +154,56 @@ pub mod token {
         address
     }
 
-    pub async fn create_mint(env: &mut TestContext, mint: &KP) {
-        let decimals = 6;
-        let rent = env.context.banks_client.get_rent().await.unwrap();
+    pub async fn create_token_account(
+        test_ctx: &mut TestContext,
+        payer: Arc<Keypair>,
+        account: &KP,
+        mint: &Pubkey,
+        owner: &Pubkey,
+    ) -> Result<(), BanksClientError> {
+        let rent = test_ctx.context.banks_client.get_rent().await.unwrap();
+        let mut transaction = Transaction::new_with_payer(
+            &[
+                system_instruction::create_account(
+                    &payer.pubkey(),
+                    &account.pubkey(),
+                    rent.minimum_balance(spl_token::state::Account::LEN),
+                    spl_token::state::Account::LEN as u64,
+                    &spl_token::id(),
+                ),
+                spl_token::instruction::initialize_account(
+                    &spl_token::id(),
+                    &account.pubkey(),
+                    mint,
+                    owner,
+                )
+                .unwrap(),
+            ],
+            Some(&payer.pubkey()),
+        );
+        transaction.sign(&[payer.as_ref(), account], test_ctx.context.last_blockhash);
+        test_ctx
+            .context
+            .banks_client
+            .process_transaction_with_commitment(transaction, CommitmentLevel::Processed)
+            .await
+            .unwrap();
+        Ok(())
+    }
+
+    pub async fn create_mint(
+        test_ctx: &mut TestContext,
+        mint: &KP,
+        decimals: u8,
+        mint_authority: &Pubkey,
+    ) {
+        let rent = test_ctx.context.banks_client.get_rent().await.unwrap();
         let mint_rent = rent.minimum_balance(Mint::LEN);
 
         let transaction = Transaction::new_signed_with_payer(
             &[
                 system_instruction::create_account(
-                    &env.context.payer.pubkey(),
+                    &test_ctx.initial_market_owner.pubkey(),
                     &mint.pubkey(),
                     mint_rent,
                     Mint::LEN as u64,
@@ -98,21 +212,51 @@ pub mod token {
                 spl_token::instruction::initialize_mint(
                     &spl_token::id(),
                     &mint.pubkey(),
-                    &env.initial_market_owner.pubkey(),
+                    mint_authority,
                     None,
                     decimals,
                 )
                 .unwrap(),
             ],
-            Some(&env.context.payer.pubkey()),
-            &[&env.context.payer, mint.as_ref()],
-            env.context.last_blockhash,
+            Some(&test_ctx.initial_market_owner.pubkey()),
+            &[&test_ctx.initial_market_owner, mint.as_ref()],
+            test_ctx.context.last_blockhash,
         );
-        env.context
-            .banks_client
-            .process_transaction_with_commitment(transaction, CommitmentLevel::Processed)
-            .await
-            .unwrap();
+        send_transaction!(test_ctx, transaction).unwrap();
+    }
+
+    pub async fn create_mint_with_freeze_auth(
+        test_ctx: &mut TestContext,
+        mint: &KP,
+        decimals: u8,
+        mint_authority: &Pubkey,
+    ) {
+        let rent = test_ctx.context.banks_client.get_rent().await.unwrap();
+        let mint_rent = rent.minimum_balance(Mint::LEN);
+
+        let transaction = Transaction::new_signed_with_payer(
+            &[
+                system_instruction::create_account(
+                    &test_ctx.initial_market_owner.pubkey(),
+                    &mint.pubkey(),
+                    mint_rent,
+                    Mint::LEN as u64,
+                    &spl_token::id(),
+                ),
+                spl_token::instruction::initialize_mint(
+                    &spl_token::id(),
+                    &mint.pubkey(),
+                    mint_authority,
+                    Some(mint_authority),
+                    decimals,
+                )
+                .unwrap(),
+            ],
+            Some(&test_ctx.initial_market_owner.pubkey()),
+            &[&test_ctx.initial_market_owner, mint.as_ref()],
+            test_ctx.context.last_blockhash,
+        );
+        send_transaction!(test_ctx, transaction).unwrap();
     }
 
     pub async fn mint_to(
@@ -133,6 +277,34 @@ pub mod token {
             .unwrap()],
             Some(&env.initial_market_owner.pubkey()),
             &[&env.initial_market_owner, env.initial_market_owner.as_ref()],
+            env.context.last_blockhash,
+        );
+        env.context
+            .banks_client
+            .process_transaction_with_commitment(transaction, CommitmentLevel::Processed)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn mint_with_authority(
+        env: &mut TestContext,
+        mint: &Pubkey,
+        mint_into_account: &Pubkey,
+        authority: &KP,
+        amount: u64,
+    ) -> Result<(), TransportError> {
+        let transaction = Transaction::new_signed_with_payer(
+            &[spl_token::instruction::mint_to(
+                &spl_token::id(),
+                mint,
+                mint_into_account,
+                &authority.pubkey(),
+                &[],
+                amount,
+            )
+            .unwrap()],
+            Some(&env.initial_market_owner.pubkey()),
+            &[&env.initial_market_owner, authority.as_ref()],
             env.context.last_blockhash,
         );
         env.context
@@ -228,6 +400,14 @@ impl TestContext {
         }
     }
 
+    pub async fn get_recent_blockhash(&mut self) -> Hash {
+        self.context
+            .banks_client
+            .get_latest_blockhash()
+            .await
+            .unwrap()
+    }
+
     pub async fn get_now_timestamp(&mut self) -> u64 {
         let clock: Clock = self
             .context
@@ -262,6 +442,22 @@ impl TestContext {
         Arc::new(account)
     }
 
+    pub async fn create_token_account(
+        &mut self,
+        account: &KP,
+        mint: &Pubkey,
+        owner: &Pubkey,
+    ) -> Result<(), BanksClientError> {
+        create_token_account(
+            self,
+            self.initial_market_owner.clone(),
+            account,
+            mint,
+            owner,
+        )
+        .await
+    }
+
     pub async fn mint_to(
         &mut self,
         mint: &Pubkey,
@@ -269,5 +465,42 @@ impl TestContext {
         amount: u64,
     ) -> Result<(), TransportError> {
         token::mint_to(self, mint, mint_into_account, amount).await
+    }
+
+    pub async fn mint_with_authority(
+        &mut self,
+        mint: &Pubkey,
+        mint_into_account: &Pubkey,
+        authority: &KP,
+        amount: u64,
+    ) -> Result<(), TransportError> {
+        token::mint_with_authority(self, mint, mint_into_account, authority, amount).await
+    }
+
+    pub async fn get_balance(&mut self, token_account: &Pubkey) -> u64 {
+        let acc = self
+            .context
+            .banks_client
+            .get_account(token_account.clone())
+            .await
+            .unwrap()
+            .unwrap();
+
+        Self::get_token_balance(&acc.data)
+    }
+
+    fn check_data_len(data: &[u8], min_len: usize) -> Result<(), ProgramError> {
+        if data.len() < min_len {
+            Err(ProgramError::AccountDataTooSmall)
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn get_token_balance(data: &[u8]) -> u64 {
+        Self::check_data_len(&data, spl_token::state::Account::get_packed_len()).unwrap();
+        let amount = array_ref![data, 64, 8];
+
+        u64::from_le_bytes(*amount)
     }
 }

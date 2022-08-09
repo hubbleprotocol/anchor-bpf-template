@@ -1,8 +1,7 @@
 use super::{runner::test, setup::funded_kp, types::TestContext};
 
 pub enum ProgramDependency {
-    WHIRLPOOL,
-    METAPLEX,
+    SOLEND,
 }
 
 pub async fn setup_empty_market_with_dependencies(
