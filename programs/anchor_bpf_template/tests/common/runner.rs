@@ -39,21 +39,6 @@ pub mod test {
             ProgramDependency::SOLEND => {
                 program_test.add_program("solend", solend::ID, None);
             }
-            ProgramDependency::BANKMAN => {
-                program_test.add_program("bankman", bankman::ID, None);
-            }
-            ProgramDependency::BRRR => {
-                program_test.add_program("brrr-0.2.0", brrr::ID, None);
-            }
-            ProgramDependency::ARROW => {
-                program_test.add_program("arrow_sunny", arrow_sunny::ID, None);
-            }
-            ProgramDependency::CRATE_TOKEN => {
-                program_test.add_program("crate_token", crate_token::ID, None);
-            }
-            ProgramDependency::SABER => {
-                program_test.add_program("stable_swap", stable_swap_client::ID, None);
-            }
         });
         program_test
     }

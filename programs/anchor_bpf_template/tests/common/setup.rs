@@ -1,12 +1,18 @@
 use std::sync::Arc;
 
-use solana_program_test::{ProgramTest, ProgramTestContext};
+use anchor_lang::prelude::Pubkey;
+use solana_program_test::{BanksClient, ProgramTest, ProgramTestContext};
 use solana_sdk::{
     account::{Account, AccountSharedData},
     signature::Keypair,
     signer::Signer,
     system_program,
 };
+
+pub struct Env<'a> {
+    pub program_id: &'a Pubkey,
+    pub client: &'a mut BanksClient,
+}
 
 pub type KP = Arc<Keypair>;
 pub fn kp() -> KP {
