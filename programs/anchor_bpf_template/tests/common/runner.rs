@@ -166,7 +166,15 @@ pub mod token {
             ],
             Some(&payer.pubkey()),
         );
-        transaction.sign(&[payer.as_ref(), account], test_ctx.context.last_blockhash);
+        transaction.sign(
+            &[payer.as_ref(), account],
+            test_ctx
+                .context
+                .banks_client
+                .get_latest_blockhash()
+                .await
+                .unwrap(),
+        );
         test_ctx
             .context
             .banks_client
@@ -205,7 +213,12 @@ pub mod token {
             ],
             Some(&test_ctx.initial_market_owner.pubkey()),
             &[&test_ctx.initial_market_owner, mint.as_ref()],
-            test_ctx.context.last_blockhash,
+            test_ctx
+                .context
+                .banks_client
+                .get_latest_blockhash()
+                .await
+                .unwrap(),
         );
         send_transaction!(test_ctx, transaction).unwrap();
     }
@@ -239,7 +252,12 @@ pub mod token {
             ],
             Some(&test_ctx.initial_market_owner.pubkey()),
             &[&test_ctx.initial_market_owner, mint.as_ref()],
-            test_ctx.context.last_blockhash,
+            test_ctx
+                .context
+                .banks_client
+                .get_latest_blockhash()
+                .await
+                .unwrap(),
         );
         send_transaction!(test_ctx, transaction).unwrap();
     }
@@ -262,7 +280,11 @@ pub mod token {
             .unwrap()],
             Some(&env.initial_market_owner.pubkey()),
             &[&env.initial_market_owner, env.initial_market_owner.as_ref()],
-            env.context.last_blockhash,
+            env.context
+                .banks_client
+                .get_latest_blockhash()
+                .await
+                .unwrap(),
         );
         env.context
             .banks_client
@@ -290,7 +312,11 @@ pub mod token {
             .unwrap()],
             Some(&env.initial_market_owner.pubkey()),
             &[&env.initial_market_owner, authority.as_ref()],
-            env.context.last_blockhash,
+            env.context
+                .banks_client
+                .get_latest_blockhash()
+                .await
+                .unwrap(),
         );
         env.context
             .banks_client
@@ -318,7 +344,11 @@ pub mod token {
             .unwrap()],
             Some(&signer.pubkey()),
             &[signer],
-            env.context.last_blockhash,
+            env.context
+                .banks_client
+                .get_latest_blockhash()
+                .await
+                .unwrap(),
         );
         env.context
             .banks_client
@@ -415,7 +445,11 @@ impl TestContext {
             )],
             Some(&self.context.payer.pubkey()),
             &[&self.context.payer, &account],
-            self.context.last_blockhash,
+            self.context
+                .banks_client
+                .get_latest_blockhash()
+                .await
+                .unwrap(),
         );
 
         self.context
